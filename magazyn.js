@@ -1846,6 +1846,7 @@ async function magPobierzDaneZewnetrzne() {
     magState.zewnetrzne = dane;
     await DB.setSetting('magZewnetrzneCache', dane);
     renderMagZewnetrzny();
+    renderMagPorownanie();
     showToast(`Pobrano dane z ${new Date(dane.pobranoO).toLocaleString('pl-PL')}`);
   } catch (e) {
     console.error('Błąd pobierania danych zewnętrznych:', e);
@@ -1871,12 +1872,25 @@ function renderMagZewnetrzny() {
   if (empty) empty.style.display = 'none';
   if (info) info.textContent = `Ostatnio pobrano: ${new Date(dane.pobranoO).toLocaleString('pl-PL')}${dane.operacje ? ` · ${dane.operacje.length} ostatnich operacji` : ''}`;
 
+  const filtrInput = document.getElementById('magZewnetrznyFiltr');
+  const filtr = filtrInput ? filtrInput.value.trim().toLowerCase() : '';
+
   // Sortuj wg zapasu dni rosnąco — to, co się kończy najszybciej, na górze.
-  const produkty = [...dane.produkty].sort((a, b) => {
+  let produkty = [...dane.produkty].sort((a, b) => {
     const za = (a.zapasDni === null || a.zapasDni === undefined) ? Infinity : a.zapasDni;
     const zb = (b.zapasDni === null || b.zapasDni === undefined) ? Infinity : b.zapasDni;
     return za - zb;
   });
+  if (filtr) {
+    produkty = produkty.filter(p =>
+      (p.nazwa || '').toLowerCase().includes(filtr) || (p.kod || '').toLowerCase().includes(filtr)
+    );
+  }
+
+  if (!produkty.length) {
+    container.innerHTML = '<div class="hint">Brak wyników dla tego wyszukiwania.</div>';
+    return;
+  }
 
   container.innerHTML = produkty.map(p => {
     let kolor = 'inherit';
@@ -1893,4 +1907,99 @@ function renderMagZewnetrzny() {
       </div>
     `;
   }).join('');
+}
+
+document.getElementById('magZewnetrznyFiltr') && document.getElementById('magZewnetrznyFiltr').addEventListener('input', renderMagZewnetrzny);
+
+// Wywoływane przez switchTab przy wejściu w zakładkę "Zewnętrzny" — odświeża
+// listę i porównywarkę razem, jednym wywołaniem (odswiez mapping przyjmuje
+// tylko jedną nazwę funkcji na zakładkę).
+function renderMagZewnetrznyZakladka() {
+  renderMagZewnetrzny();
+  renderMagPorownanie();
+}
+
+// ===== PORÓWNYWARKA: NASZ STAN VS SYSTEM ZEWNĘTRZNY =====
+// Dopasowanie po p.indeks (Baza produktów) ↔ zewn.kod (system 10.0.60.24).
+// Stan magazynowy liczony ZAWSZE z computeStock() (nasze dane) — to jest
+// tylko podgląd/porównanie, nie zmienia niczego lokalnie.
+function magZewnetrznyOpisRoznicy(roznica) {
+  if (roznica === 0) return { tekst: 'zgadza się', kolor: 'inherit' };
+  if (roznica > 0) return { tekst: `u nas o ${roznica} więcej`, kolor: '#e08a3d' };
+  return { tekst: `u nas o ${Math.abs(roznica)} mniej`, kolor: '#c0392b' };
+}
+
+function magZewnetrznyBudujPorownanie() {
+  const dane = magState.zewnetrzne;
+  const wynik = { dopasowane: [], lokalneBezDopasowania: [], zewnetrzneBezDopasowania: [] };
+  if (!dane || !dane.produkty || !dane.produkty.length) return wynik;
+
+  const zewnMapa = new Map();
+  dane.produkty.forEach(z => zewnMapa.set(z.kod, z));
+  const uzyteKody = new Set();
+
+  magState.products.filter(p => p.active !== 0).forEach(p => {
+    if (!p.indeks) return; // brak indeksu — nie próbujemy dopasować, pomijamy w porównaniu
+    const zewn = zewnMapa.get(p.indeks);
+    if (!zewn) { wynik.lokalneBezDopasowania.push(p); return; }
+    uzyteKody.add(p.indeks);
+    // WAŻNE: computeStock() liczy w jednostce ROZŁOŻONEJ (np. kg — ilość
+    // opakowań razy rozmiar opakowania), a system 10.0.60.24 liczy w
+    // sztukach/opakowaniach. Bez tego przeliczenia porównywaliśmy kg do
+    // sztuk, co dawało bezsensowne, ogromne "różnice".
+    const naszRozlozony = computeStock(p).stanBiezacy;
+    const nasz = p.wielkoscOpak ? magStoredToOpak(naszRozlozony, p.wielkoscOpak) : naszRozlozony;
+    const roznica = Math.round((nasz - zewn.stan) * 100) / 100;
+    wynik.dopasowane.push({ p, zewn, nasz, roznica });
+  });
+
+  wynik.zewnetrzneBezDopasowania = dane.produkty.filter(z => !uzyteKody.has(z.kod));
+  // Najbardziej rozbieżne pary na górze — to jest to, co warto sprawdzić najpierw.
+  wynik.dopasowane.sort((a, b) => Math.abs(b.roznica) - Math.abs(a.roznica));
+  return wynik;
+}
+
+function renderMagPorownanie() {
+  const listaContainer = document.getElementById('magPorownanieList');
+  const empty = document.getElementById('magPorownanieEmpty');
+  const niedopasowaneContainer = document.getElementById('magPorownanieNiedopasowane');
+  if (!listaContainer) return;
+
+  const { dopasowane, lokalneBezDopasowania, zewnetrzneBezDopasowania } = magZewnetrznyBudujPorownanie();
+
+  if (!dopasowane.length) {
+    listaContainer.innerHTML = '';
+    if (empty) empty.style.display = 'block';
+  } else {
+    if (empty) empty.style.display = 'none';
+    listaContainer.innerHTML = dopasowane.map(({ p, zewn, nasz, roznica }) => {
+      const { tekst, kolor } = magZewnetrznyOpisRoznicy(roznica);
+      return `
+        <div class="picked-items-row">
+          <span><strong>${escapeHtml(p.nazwa)}</strong> <span class="hint">(${escapeHtml(p.indeks)})</span></span>
+          <span>Nasz: ${nasz} szt · Ich: ${zewn.stan} szt — <span style="color:${kolor};font-weight:600;">${tekst}</span></span>
+        </div>
+      `;
+    }).join('');
+  }
+
+  const razemNiedopasowane = lokalneBezDopasowania.length + zewnetrzneBezDopasowania.length;
+  if (!niedopasowaneContainer) return;
+  if (!razemNiedopasowane) {
+    niedopasowaneContainer.innerHTML = '';
+    return;
+  }
+  const listaLokalne = lokalneBezDopasowania.map(p =>
+    `<div class="hint">• ${escapeHtml(p.nazwa)} (indeks: ${escapeHtml(p.indeks)}) — nie znaleziono takiego kodu w danych z 10.0.60.24</div>`
+  ).join('');
+  const listaZewnetrzne = zewnetrzneBezDopasowania.map(z =>
+    `<div class="hint">• ${escapeHtml(z.kod)} ${escapeHtml(z.nazwa)} — brak u nas produktu z takim Indeksem</div>`
+  ).join('');
+  niedopasowaneContainer.innerHTML = `
+    <div class="card">
+      <h3 style="margin-bottom:8px;">Niedopasowane (${razemNiedopasowane})</h3>
+      ${listaLokalne}
+      ${listaZewnetrzne}
+    </div>
+  `;
 }

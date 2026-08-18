@@ -2720,11 +2720,25 @@
       <button class="btn full-width" id="magFetchZewnetrznyBtn" style="margin-bottom:8px;">☁️ Pobierz dane z systemu magazynowego</button>
       <div class="hint" id="magZewnetrznyInfo"></div>
     </div>
+    <div class="card">
+      <input type="text" id="magZewnetrznyFiltr" placeholder="Szukaj po nazwie lub indeksie...">
+    </div>
     <div id="magZewnetrznyList"></div>
     <div class="empty-state" id="magZewnetrznyEmpty" style="display:none;">
       <div class="icon">📥</div>
       <div>Jeszcze nic nie pobrano — uruchom najpierw skrypt na 10.0.60.24, potem kliknij przycisk wyżej.</div>
     </div>
+
+    <div class="card">
+      <h2>Porównanie: Twój stan vs system 10.0.60.24</h2>
+      <div class="hint" style="margin-bottom:12px;">Dopasowanie po polu "Indeks" (Baza produktów) ↔ kodzie z systemu zewnętrznego. Uzupełnij Indeks przy produktach, których chcesz porównywać. Porównanie zawsze w sztukach/opakowaniach (nie w kg/l) — Twój stan jest automatycznie przeliczany z jednostki magazynowej na sztuki, zgodnie z rozmiarem opakowania ustawionym przy produkcie.</div>
+    </div>
+    <div id="magPorownanieList"></div>
+    <div class="empty-state" id="magPorownanieEmpty" style="display:none;">
+      <div class="icon">🔗</div>
+      <div>Brak dopasowanych par — uzupełnij pole "Indeks" w Bazie produktów (tymi samymi kodami co w systemie 10.0.60.24) i pobierz dane wyżej.</div>
+    </div>
+    <div id="magPorownanieNiedopasowane"></div>
   </div>
 
 
