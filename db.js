@@ -4,7 +4,7 @@
 //       employees, attendanceRecords, leaveRequests
 
 const DB_NAME = 'nadziewarki_serwis_db';
-const DB_VERSION = 12;
+const DB_VERSION = 14;
 let dbInstance = null;
 
 function openDB() {
@@ -153,6 +153,41 @@ function openDB() {
       // ta kolejka to strona NADAWCY, zanim dane w ogóle dotrą do internetu).
       if (!db.objectStoreNames.contains('firebaseQueue')) {
         db.createObjectStore('firebaseQueue', { keyPath: 'id' });
+      }
+      // Harmonogram codzienny (v13) — osobny, w pełni edytowalny moduł: obszary
+      // (np. Antipasti, Hummus) → zadania w nich → codzienne potwierdzenia
+      // wykonania, z opcjonalnym pomiarem pH.
+      if (!db.objectStoreNames.contains('harmCodzObszary')) {
+        db.createObjectStore('harmCodzObszary', { keyPath: 'id' });
+      }
+      if (!db.objectStoreNames.contains('harmCodzZadania')) {
+        const s = db.createObjectStore('harmCodzZadania', { keyPath: 'id' });
+        s.createIndex('obszarId', 'obszarId');
+      }
+      if (!db.objectStoreNames.contains('harmCodzWpisy')) {
+        const s = db.createObjectStore('harmCodzWpisy', { keyPath: 'id' });
+        s.createIndex('zadanieId', 'zadanieId');
+        s.createIndex('data', 'data');
+      }
+      // Legenda statusów potwierdzenia (v14) — np. PZ/PK/PM/N/X, w pełni
+      // edytowalna przez admina (kod, opis, kolor, czy wymaga komentarza).
+      // Dotyczy WYŁĄCZNIE Harmonogramu codziennego, nie cyklicznego.
+      if (!db.objectStoreNames.contains('harmCodzStatusy')) {
+        db.createObjectStore('harmCodzStatusy', { keyPath: 'id' });
+      }
+      // Harmonogram cykliczny (v13) — ta sama idea, ale zadania mają
+      // częstotliwość (co X dni albo konkretne dni tygodnia) zamiast "co dzień".
+      if (!db.objectStoreNames.contains('harmCyklObszary')) {
+        db.createObjectStore('harmCyklObszary', { keyPath: 'id' });
+      }
+      if (!db.objectStoreNames.contains('harmCyklZadania')) {
+        const s = db.createObjectStore('harmCyklZadania', { keyPath: 'id' });
+        s.createIndex('obszarId', 'obszarId');
+      }
+      if (!db.objectStoreNames.contains('harmCyklWpisy')) {
+        const s = db.createObjectStore('harmCyklWpisy', { keyPath: 'id' });
+        s.createIndex('zadanieId', 'zadanieId');
+        s.createIndex('data', 'data');
       }
     };
 
@@ -1018,7 +1053,7 @@ DB.removeFirebaseQueueItem = (id) => DB.delete('firebaseQueue', id);
 // Każde urządzenie ma WŁASNĄ, niezależną listę kont — nie ma wspólnego serwera,
 // więc konta zakłada się fizycznie na każdym urządzeniu z osobna.
 
-const ALL_MODULE_KEYS = ['nadziewarki', 'satelity', 'obecnosc', 'magazyn', 'szkolenia', 'centrala', 'ustawienia'];
+const ALL_MODULE_KEYS = ['nadziewarki', 'satelity', 'obecnosc', 'magazyn', 'szkolenia', 'harmCodzienny', 'harmCykliczny', 'centrala', 'ustawienia'];
 
 async function sha256Hex(text) {
   const enc = new TextEncoder().encode(text);
@@ -1311,3 +1346,62 @@ DB.markDecisionsSent = async (ids) => {
     }
   }
 };
+
+// ===== HARMONOGRAM CODZIENNY (obszary → zadania → potwierdzenia wykonania) =====
+DB.getHarmCodzObszary = () => DB.getAll('harmCodzObszary');
+DB.saveHarmCodzObszar = (o) => {
+  if (!o.id) o.id = genId();
+  if (o.active === undefined) o.active = 1;
+  return DB.put('harmCodzObszary', o);
+};
+DB.deleteHarmCodzObszar = (id) => DB.delete('harmCodzObszary', id);
+
+DB.getHarmCodzZadania = () => DB.getAll('harmCodzZadania');
+DB.saveHarmCodzZadanie = (z) => {
+  if (!z.id) z.id = genId();
+  if (z.active === undefined) z.active = 1;
+  return DB.put('harmCodzZadania', z);
+};
+DB.deleteHarmCodzZadanie = (id) => DB.delete('harmCodzZadania', id);
+
+DB.getHarmCodzWpisy = () => DB.getAll('harmCodzWpisy');
+DB.saveHarmCodzWpis = (w) => {
+  if (!w.id) w.id = genId();
+  if (!w.createdAt) w.createdAt = Date.now();
+  return DB.put('harmCodzWpisy', w);
+};
+DB.deleteHarmCodzWpis = (id) => DB.delete('harmCodzWpisy', id);
+
+// Legenda statusów potwierdzenia (PZ/PK/PM/N/X itp.) — wyłącznie Harmonogram codzienny.
+DB.getHarmCodzStatusy = () => DB.getAll('harmCodzStatusy');
+DB.saveHarmCodzStatus = (s) => {
+  if (!s.id) s.id = genId();
+  if (s.active === undefined) s.active = 1;
+  return DB.put('harmCodzStatusy', s);
+};
+DB.deleteHarmCodzStatus = (id) => DB.delete('harmCodzStatusy', id);
+
+// ===== HARMONOGRAM CYKLICZNY (jak wyżej, ale zadania mają częstotliwość) =====
+DB.getHarmCyklObszary = () => DB.getAll('harmCyklObszary');
+DB.saveHarmCyklObszar = (o) => {
+  if (!o.id) o.id = genId();
+  if (o.active === undefined) o.active = 1;
+  return DB.put('harmCyklObszary', o);
+};
+DB.deleteHarmCyklObszar = (id) => DB.delete('harmCyklObszary', id);
+
+DB.getHarmCyklZadania = () => DB.getAll('harmCyklZadania');
+DB.saveHarmCyklZadanie = (z) => {
+  if (!z.id) z.id = genId();
+  if (z.active === undefined) z.active = 1;
+  return DB.put('harmCyklZadania', z);
+};
+DB.deleteHarmCyklZadanie = (id) => DB.delete('harmCyklZadania', id);
+
+DB.getHarmCyklWpisy = () => DB.getAll('harmCyklWpisy');
+DB.saveHarmCyklWpis = (w) => {
+  if (!w.id) w.id = genId();
+  if (!w.createdAt) w.createdAt = Date.now();
+  return DB.put('harmCyklWpisy', w);
+};
+DB.deleteHarmCyklWpis = (id) => DB.delete('harmCyklWpisy', id);

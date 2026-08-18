@@ -15,7 +15,8 @@ let magState = {
   currentOrderItems: [], // [{ productId, ilosc }] — pozycje edytowanego zamówienia
   pendingReceiptItems: [], // pozycje dodawane wsadowo w oknie "Nowe przyjęcia" przed zapisem
   pendingIssueItems: [],   // jw. dla "Nowe wydania"
-  blokadaUjemnych: true    // domyślnie WŁĄCZONA — nadpisywana ustawieniem z bazy w initMagazyn()
+  blokadaUjemnych: true,   // domyślnie WŁĄCZONA — nadpisywana ustawieniem z bazy w initMagazyn()
+  zewnetrzne: null          // ostatnia pobrana paczka danych z systemu 10.0.60.24 (patrz initMagazyn)
 };
 
 // ===== Ustawienie: blokada wydań schodzących poniżej zera =====
@@ -45,6 +46,7 @@ async function initMagazyn() {
   magState.issues = await DB.getMagIssues();
   magState.orders = await DB.getMagOrders();
   await magLoadBlokadaSetting();
+  magState.zewnetrzne = await DB.getSetting('magZewnetrzneCache', null);
 
   document.getElementById('magIssueData').value = todayStr();
   document.getElementById('magOrderData').value = todayStr();
@@ -1399,10 +1401,16 @@ function magForecastLiczDni(od, doD) {
 // doSprawdzenia: zerowy stan + brak zużycia w okresie + brak Stanu minimalnego
 //   — nie ma żadnej liczby do policzenia, ale zerowy stan sam w sobie wart jest
 //   uwagi, więc trafia do przeglądu zamiast zniknąć bez śladu.
-function magComputeForecastSuggestions(od, doD, zapasDni) {
+function magComputeForecastSuggestions(od, doD, zapasDni, zrodloZuzycia) {
   const dniOkresu = magForecastLiczDni(od, doD);
   const pewne = [];
   const doSprawdzenia = [];
+  const uzywajZewnetrznego = zrodloZuzycia === 'zewnetrzne';
+  // Mapa indeks → dane zewnętrzne, budowana raz na start (nie w pętli produktów).
+  const zewnMapa = new Map();
+  if (uzywajZewnetrznego && magState.zewnetrzne && magState.zewnetrzne.produkty) {
+    magState.zewnetrzne.produkty.forEach(z => zewnMapa.set(z.kod, z));
+  }
   // Do informacji w uzasadnieniu "do sprawdzenia": czy towar był ostatnio
   // przyjmowany (30 dni wstecz od końca wybranego okresu).
   const przyjeciaOd = new Date(doD + 'T00:00:00');
@@ -1411,15 +1419,32 @@ function magComputeForecastSuggestions(od, doD, zapasDni) {
   const przyjeciaOdStr = `${przyjeciaOd.getFullYear()}-${String(przyjeciaOd.getMonth() + 1).padStart(2, '0')}-${String(przyjeciaOd.getDate()).padStart(2, '0')}`;
 
   for (const p of magState.products) {
-    const sumaZuzycia = magState.issues
-      .filter(i => i.productId === p.id && i.data >= od && i.data <= doD)
-      .reduce((s, i) => s + (Number(i.iloscWydana) || 0), 0);
     const stock = computeStock(p);
     const jm = p.jm || '';
+    let srDzienne = null;
+    let zrodloOpis = '';
 
-    if (sumaZuzycia > 0) {
-      // Mamy realne tempo zużycia z okresu — liczymy z niego.
-      const srDzienne = sumaZuzycia / dniOkresu;
+    if (uzywajZewnetrznego) {
+      // Stan magazynowy ZAWSZE nasz (computeStock powyżej) — tylko tempo
+      // zużycia bierzemy z zewnątrz, i tylko gdy jest jednoznaczne dopasowanie
+      // po polu "Indeks".
+      const zewn = p.indeks ? zewnMapa.get(p.indeks) : null;
+      if (zewn && zewn.zuzycieDzien !== null && zewn.zuzycieDzien !== undefined && zewn.zuzycieDzien > 0) {
+        srDzienne = zewn.zuzycieDzien;
+        zrodloOpis = `zużycie z systemu 10.0.60.24 (indeks ${p.indeks}): ${srDzienne} ${jm}/dzień`;
+      }
+      // Brak dopasowania albo brak zużycia tam — spada do sekcji "do sprawdzenia" niżej.
+    } else {
+      const sumaZuzycia = magState.issues
+        .filter(i => i.productId === p.id && i.data >= od && i.data <= doD)
+        .reduce((s, i) => s + (Number(i.iloscWydana) || 0), 0);
+      if (sumaZuzycia > 0) {
+        srDzienne = sumaZuzycia / dniOkresu;
+        zrodloOpis = `śr. zużycie: ${srDzienne.toFixed(2)} ${jm}/dzień (${sumaZuzycia} ${jm} w ${dniOkresu} dn.)`;
+      }
+    }
+
+    if (srDzienne !== null) {
       const potrzebne = srDzienne * zapasDni;
       const brakuje = potrzebne - stock.stanBiezacy;
       if (brakuje <= 0) continue; // obecny stan i tak pokryje zadany zapas
@@ -1428,19 +1453,19 @@ function magComputeForecastSuggestions(od, doD, zapasDni) {
       if (iloscOpak <= 0) continue;
 
       const dniPokrycia = Math.floor(stock.stanBiezacy / srDzienne);
-      const uzasadnienie = `śr. zużycie: ${srDzienne.toFixed(2)} ${jm}/dzień (${sumaZuzycia} ${jm} w ${dniOkresu} dn.) · obecny zapas starczy na ~${dniPokrycia} dni · cel: ${zapasDni} dni`;
+      const uzasadnienie = `${zrodloOpis} · obecny zapas (nasz) starczy na ~${dniPokrycia} dni · cel: ${zapasDni} dni`;
       pewne.push({ p, ilosc: iloscOpak, uzasadnienie, dniPokrycia });
       continue;
     }
 
-    // Brak zużycia w wybranym okresie — nie pomijamy w ciszy, sprawdzamy dalej.
+    // Brak zużycia (z wybranego źródła) — nie pomijamy w ciszy, sprawdzamy dalej.
     if (stock.stanMin > 0 && stock.stanBiezacy <= stock.stanMin) {
       // Nic nie było zużyte w tym oknie czasu, ale stan i tak jest poniżej
       // ustawionego minimum — to samo kryterium co "Zamów braki automatycznie".
       const brakuje = stock.stanMin - stock.stanBiezacy;
       const iloscOpak = (p.wielkoscOpak && p.wielkoscOpak > 0) ? Math.ceil(brakuje / p.wielkoscOpak) : Math.ceil(brakuje);
       if (iloscOpak > 0) {
-        const uzasadnienie = `brak zużycia w wybranym okresie — sugestia wg ustawionego Stanu minimalnego (obecnie: ${stock.stanBiezacy} ${jm}, próg: ${stock.stanMin} ${jm})`;
+        const uzasadnienie = `brak zużycia w wybranym źródle — sugestia wg ustawionego Stanu minimalnego (obecnie: ${stock.stanBiezacy} ${jm}, próg: ${stock.stanMin} ${jm})`;
         pewne.push({ p, ilosc: iloscOpak, uzasadnienie, dniPokrycia: 0 });
       }
       continue;
@@ -1451,9 +1476,12 @@ function magComputeForecastSuggestions(od, doD, zapasDni) {
       // — nie ma żadnej liczby do wyliczenia ilości. Zamiast zgadywać albo
       // milczeć, pytamy: czy w ogóle uwzględnić ten towar w zamówieniu.
       const maOstatniePrzyjecia = magState.receipts.some(r => r.productId === p.id && r.data >= przyjeciaOdStr && r.data <= doD);
+      const powodBrakuZuzycia = uzywajZewnetrznego
+        ? (p.indeks ? 'brak dopasowania w danych z 10.0.60.24 albo brak tam wartości zużycia' : 'brak wypełnionego pola "Indeks" — nie da się dopasować do systemu zewnętrznego')
+        : 'brak zużycia w wybranym okresie';
       const uzasadnienie = maOstatniePrzyjecia
-        ? `stan: 0 ${jm}, brak zużycia w okresie, ale towar był ostatnio przyjmowany — sprawdź, czy dane są poprawne`
-        : `stan: 0 ${jm}, brak zużycia w okresie i brak przyjęć w ostatnich 30 dniach — możliwe, że towar nie jest już potrzebny, a może po prostu zabrakło`;
+        ? `stan: 0 ${jm}, ${powodBrakuZuzycia}, ale towar był ostatnio przyjmowany — sprawdź, czy dane są poprawne`
+        : `stan: 0 ${jm}, ${powodBrakuZuzycia} i brak przyjęć w ostatnich 30 dniach — możliwe, że towar nie jest już potrzebny, a może po prostu zabrakło`;
       doSprawdzenia.push({ p, uzasadnienie });
     }
   }
@@ -1505,7 +1533,13 @@ document.getElementById('magForecastGenerateBtn').addEventListener('click', () =
     : parseInt(zapasWybor);
   if (!zapasDni || zapasDni <= 0) { showToast('Podaj poprawną liczbę dni zapasu'); return; }
 
-  magForecastWyniki = magComputeForecastSuggestions(od, doD, zapasDni);
+  const zrodloZuzycia = document.getElementById('magForecastZrodloZuzycia').value;
+  if (zrodloZuzycia === 'zewnetrzne' && (!magState.zewnetrzne || !magState.zewnetrzne.produkty || !magState.zewnetrzne.produkty.length)) {
+    showToast('Brak jeszcze danych z systemu zewnętrznego — wejdź w zakładkę "Zewnętrzny" i pobierz je najpierw');
+    return;
+  }
+
+  magForecastWyniki = magComputeForecastSuggestions(od, doD, zapasDni, zrodloZuzycia);
   const { pewne, doSprawdzenia } = magForecastWyniki;
 
   document.getElementById('magForecastPewneSection').style.display = pewne.length ? 'block' : 'none';
@@ -1795,3 +1829,68 @@ document.getElementById('sendMagOrderPdfBtn').addEventListener('click', async ()
 });
 
 initMagazyn();
+
+// ===== DANE Z SYSTEMU MAGAZYNOWEGO 10.0.60.24 (tylko-do-odczytu podgląd) =====
+// Dane trafiają tu przez Firebase — skrypt uruchamiany raz w tygodniu na
+// komputerze z dostępem do 10.0.60.24 wysyła je do kolekcji
+// `magazynZewnetrzny`. Tutaj tylko pobieramy NAJNOWSZY wpis i pokazujemy —
+// świadomie NIE scalamy z lokalnymi magProducts/computeStock, bo to jest
+// osobny, równoległy system (patrz ustalenia z userem).
+async function magPobierzDaneZewnetrzne() {
+  if (!navigator.onLine) { showToast('Brak internetu'); return; }
+  if (typeof fbInit !== 'function' || !fbInit()) { showToast('Brak połączenia z Firebase'); return; }
+  try {
+    const snap = await fbDb.collection('magazynZewnetrzny').orderBy('pobranoO', 'desc').limit(1).get();
+    if (snap.empty) { showToast('Brak jeszcze żadnych danych — uruchom najpierw skrypt na 10.0.60.24'); return; }
+    const dane = snap.docs[0].data();
+    magState.zewnetrzne = dane;
+    await DB.setSetting('magZewnetrzneCache', dane);
+    renderMagZewnetrzny();
+    showToast(`Pobrano dane z ${new Date(dane.pobranoO).toLocaleString('pl-PL')}`);
+  } catch (e) {
+    console.error('Błąd pobierania danych zewnętrznych:', e);
+    showToast('Błąd pobierania — spróbuj ponownie');
+  }
+}
+
+document.getElementById('magFetchZewnetrznyBtn') && document.getElementById('magFetchZewnetrznyBtn').addEventListener('click', magPobierzDaneZewnetrzne);
+
+function renderMagZewnetrzny() {
+  const container = document.getElementById('magZewnetrznyList');
+  const empty = document.getElementById('magZewnetrznyEmpty');
+  const info = document.getElementById('magZewnetrznyInfo');
+  if (!container) return;
+  const dane = magState.zewnetrzne;
+
+  if (!dane || !dane.produkty || !dane.produkty.length) {
+    container.innerHTML = '';
+    if (empty) empty.style.display = 'block';
+    if (info) info.textContent = '';
+    return;
+  }
+  if (empty) empty.style.display = 'none';
+  if (info) info.textContent = `Ostatnio pobrano: ${new Date(dane.pobranoO).toLocaleString('pl-PL')}${dane.operacje ? ` · ${dane.operacje.length} ostatnich operacji` : ''}`;
+
+  // Sortuj wg zapasu dni rosnąco — to, co się kończy najszybciej, na górze.
+  const produkty = [...dane.produkty].sort((a, b) => {
+    const za = (a.zapasDni === null || a.zapasDni === undefined) ? Infinity : a.zapasDni;
+    const zb = (b.zapasDni === null || b.zapasDni === undefined) ? Infinity : b.zapasDni;
+    return za - zb;
+  });
+
+  container.innerHTML = produkty.map(p => {
+    let kolor = 'inherit';
+    if (p.zapasDni !== null && p.zapasDni !== undefined) {
+      if (p.zapasDni < 7) kolor = '#c0392b';
+      else if (p.zapasDni < 14) kolor = '#e08a3d';
+    }
+    const zapasTekst = (p.zapasDni !== null && p.zapasDni !== undefined) ? `${p.zapasDni} dni` : '—';
+    const zuzycieTekst = (p.zuzycieDzien !== null && p.zuzycieDzien !== undefined) ? `, zużycie: ${p.zuzycieDzien}/dzień` : '';
+    return `
+      <div class="picked-items-row">
+        <span><strong>${escapeHtml(p.kod)}</strong> ${escapeHtml(p.nazwa)} — stan: ${p.stan}${zuzycieTekst}</span>
+        <span style="color:${kolor};font-weight:600;">${zapasTekst}</span>
+      </div>
+    `;
+  }).join('');
+}

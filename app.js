@@ -66,6 +66,7 @@ function switchTab(tabName) {
     magReceipts: 'renderMagReceipts',
     magIssues: 'renderMagIssues',
     magOrders: 'renderMagOrders',
+    magZewnetrzny: 'renderMagZewnetrzny',
     magZuzycie: 'initZuzycie',
     machines: 'renderMachineList',
     parts: 'renderPartsList',
@@ -80,7 +81,16 @@ function switchTab(tabName) {
     obsLeave: 'renderLeaveList',
     obsStats: 'renderObsStats',
     obsCalView: 'renderCalendarActiveView',
-    obsSettingsView: 'odswiezUstawieniaObecnosci'
+    obsSettingsView: 'odswiezUstawieniaObecnosci',
+    harmCodzDzien: 'renderHarmCodzDzien',
+    harmCodzObszary: 'renderHarmCodzObszaryList',
+    harmCodzZadania: 'renderHarmCodzZadaniaList',
+    harmCodzHistoria: 'renderHarmCodzHistoria',
+    harmCodzUstawienia: 'renderHarmCodzUstawienia',
+    harmCyklDzien: 'renderHarmCyklDzien',
+    harmCyklObszary: 'renderHarmCyklObszaryList',
+    harmCyklZadania: 'renderHarmCyklZadaniaList',
+    harmCyklHistoria: 'renderHarmCyklHistoria'
   }[tabName];
   if (odswiez && typeof window[odswiez] === 'function') window[odswiez]();
 }
@@ -116,6 +126,8 @@ const MODULE_LABELS = {
   obecnosc: '👥 Obecność',
   magazyn: '📦 Magazyn',
   szkolenia: '🎓 Szkolenia',
+  harmCodzienny: '📅 Harmonogram codzienny',
+  harmCykliczny: '🔄 Harmonogram cykliczny',
   centrala: '🏢 Centrala',
   ustawienia: '🔧 Ustawienia'
 };
@@ -813,6 +825,18 @@ function openModule(moduleName) {
     document.getElementById('addMachineFab').style.display = 'none';
     document.getElementById('addDeviceFab') && (document.getElementById('addDeviceFab').style.display = 'none');
     if (typeof initSzkolenia === 'function') initSzkolenia();
+  } else if (moduleName === 'harmCodzienny') {
+    document.getElementById('moduleHarmCodzienny').style.display = 'block';
+    switchTab('harmCodzDzien');
+    document.getElementById('addMachineFab').style.display = 'none';
+    document.getElementById('addDeviceFab') && (document.getElementById('addDeviceFab').style.display = 'none');
+    if (typeof initHarmCodzienny === 'function') initHarmCodzienny();
+  } else if (moduleName === 'harmCykliczny') {
+    document.getElementById('moduleHarmCykliczny').style.display = 'block';
+    switchTab('harmCyklDzien');
+    document.getElementById('addMachineFab').style.display = 'none';
+    document.getElementById('addDeviceFab') && (document.getElementById('addDeviceFab').style.display = 'none');
+    if (typeof initHarmCykliczny === 'function') initHarmCykliczny();
   } else if (moduleName === 'ustawienia') {
     document.getElementById('moduleUstawienia').style.display = 'block';
     document.getElementById('addMachineFab').style.display = 'none';
@@ -879,7 +903,7 @@ document.querySelectorAll('.back-to-home').forEach(btn => {
 // JEDNO źródło prawdy: stała poniżej. Aktualizowana automatycznie przy każdym
 // pakowaniu paczki (skrypt wersjonujący), więc UI nigdy nie pokazuje starego
 // numeru tak jak się to zdarzyło wcześniej przy ręcznej edycji w trzech miejscach.
-const PWA_BUILD_VERSION = 'v135';
+const PWA_BUILD_VERSION = 'v139';
 function applyBuildVersionLabel(label) {
   const title = document.getElementById('pageTitle');
   if (title) title.textContent = `ZSZD Higiena ADMIN ${label}`;

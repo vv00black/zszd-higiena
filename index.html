@@ -674,6 +674,16 @@
       <div class="tile-label">Szkolenia</div>
       <div class="tile-sub">Karty indywidualne i grupowe</div>
     </div>
+    <div class="home-tile" data-goto="harmCodzienny">
+      <span class="tile-icon">📅</span>
+      <div class="tile-label">Harmonogram codzienny</div>
+      <div class="tile-sub">Potwierdzenie prac, obszary</div>
+    </div>
+    <div class="home-tile" data-goto="harmCykliczny">
+      <span class="tile-icon">🔄</span>
+      <div class="tile-label">Harmonogram cykliczny</div>
+      <div class="tile-sub">Zadania co X dni / wg dni tygodnia</div>
+    </div>
     <div class="home-tile" data-goto="ustawienia">
       <span class="tile-icon">🔧</span>
       <div class="tile-label">Ustawienia</div>
@@ -1768,6 +1778,256 @@
   </div>
 </div>
 
+<div id="moduleHarmCodzienny" style="display:none;">
+  <div class="module-topbar">
+    <button class="back-to-home" data-back="home" title="Powrót do menu">←</button>
+    <div class="module-topbar-title">📅 Harmonogram codzienny</div>
+  </div>
+  <nav class="tabs" id="tabsHarmCodz">
+    <button class="tab-btn active" data-view="harmCodzDzien">Dziś</button>
+    <button class="tab-btn" data-view="harmCodzObszary">Obszary</button>
+    <button class="tab-btn" data-view="harmCodzZadania">Zadania</button>
+    <button class="tab-btn" data-view="harmCodzHistoria">Historia</button>
+    <button class="tab-btn" data-view="harmCodzUstawienia">Ustawienia</button>
+  </nav>
+<div class="container">
+
+  <div class="view active" id="view-harmCodzDzien">
+    <div class="card">
+      <div class="hint" style="margin-bottom:10px;">Potwierdź wykonanie zadań przypisanych do dzisiejszego dnia, pogrupowane wg obszaru.</div>
+      <input type="date" id="harmCodzDzienData" style="max-width:220px;">
+    </div>
+    <div id="harmCodzDzienList"></div>
+    <div class="empty-state" id="harmCodzDzienEmpty" style="display:none;">
+      <div class="icon">📅</div>
+      <div>Brak zadań — dodaj pierwsze w zakładce "Zadania".</div>
+    </div>
+  </div>
+
+  <div class="view" id="view-harmCodzObszary">
+    <div class="card">
+      <h2>Obszary</h2>
+      <div class="hint" style="margin-bottom:12px;">W pełni edytowalna lista — np. Antipasti, Hummus. Możesz dodawać, zmieniać nazwę i usuwać w dowolnym momencie.</div>
+      <div id="harmCodzObszaryList"></div>
+      <div class="row" style="margin-top:8px;">
+        <div class="field" style="margin-bottom:0;flex:1;">
+          <input type="text" id="harmCodzNewObszarNazwa" placeholder="np. Antipasti">
+        </div>
+      </div>
+      <div class="row" style="margin-top:8px;">
+        <button class="btn secondary" id="harmCodzAddObszarBtn">Dodaj obszar</button>
+        <button class="btn" id="harmCodzCancelObszarEditBtn" style="display:none;">Anuluj</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="view" id="view-harmCodzZadania">
+    <div class="card">
+      <h2>Zadania</h2>
+      <div class="hint" style="margin-bottom:12px;">Każde zadanie należy do jednego obszaru. Zaznacz "wymaga pomiaru pH", jeśli przy potwierdzeniu ma się pojawić pole na wynik pomiaru.</div>
+      <div id="harmCodzZadaniaList"></div>
+      <div class="field">
+        <label>Obszar</label>
+        <select id="harmCodzNewZadanieObszar"></select>
+      </div>
+      <div class="field">
+        <label>Nazwa zadania</label>
+        <input type="text" id="harmCodzNewZadanieNazwa" placeholder="np. Mycie taśmy">
+      </div>
+      <label style="display:flex;align-items:center;gap:8px;margin-bottom:12px;cursor:pointer;">
+        <input type="checkbox" id="harmCodzNewZadanieWymagaPH" style="width:20px;height:20px;">
+        <span>Wymaga pomiaru pH</span>
+      </label>
+      <div class="row">
+        <button class="btn secondary" id="harmCodzAddZadanieBtn">Dodaj zadanie</button>
+        <button class="btn" id="harmCodzCancelZadanieEditBtn" style="display:none;">Anuluj</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="view" id="view-harmCodzHistoria">
+    <div class="card">
+      <h2>Historia potwierdzeń</h2>
+      <div class="row">
+        <div class="field" style="flex:1;">
+          <label>Od</label>
+          <input type="date" id="harmCodzHistOd">
+        </div>
+        <div class="field" style="flex:1;">
+          <label>Do</label>
+          <input type="date" id="harmCodzHistDo">
+        </div>
+      </div>
+      <button class="btn secondary" id="harmCodzHistFilterBtn">Pokaż</button>
+    </div>
+    <div id="harmCodzHistoriaList"></div>
+  </div>
+
+  <div class="view" id="view-harmCodzUstawienia">
+    <div class="card">
+      <h2>Legenda statusów</h2>
+      <div class="hint" style="margin-bottom:12px;">W pełni edytowalna — np. PZ/PK/PM/N/X, dokładnie jak w dotychczasowym arkuszu. Zaznacz "wymaga komentarza", jeśli wybranie tego statusu ma wymuszać wpisanie uzasadnienia.</div>
+      <div id="harmCodzStatusyList"></div>
+      <div class="field">
+        <label>Kod</label>
+        <input type="text" id="harmCodzNewStatusKod" placeholder="np. PZ">
+      </div>
+      <div class="field">
+        <label>Opis</label>
+        <input type="text" id="harmCodzNewStatusOpis" placeholder="np. Mycie zasadowe przeprowadzone prawidłowo">
+      </div>
+      <div class="field">
+        <label>Kolor</label>
+        <input type="color" id="harmCodzNewStatusKolor" value="#c9d94f" style="width:70px;height:38px;padding:2px;">
+      </div>
+      <label style="display:flex;align-items:center;gap:8px;margin-bottom:12px;cursor:pointer;">
+        <input type="checkbox" id="harmCodzNewStatusWymagaKomentarza" style="width:20px;height:20px;">
+        <span>Wymaga komentarza przy wyborze</span>
+      </label>
+      <div class="row">
+        <button class="btn secondary" id="harmCodzAddStatusBtn">Dodaj status</button>
+        <button class="btn" id="harmCodzCancelStatusEditBtn" style="display:none;">Anuluj</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Miejsca pomiaru pH</h2>
+      <div class="hint" style="margin-bottom:12px;">Lista do wyboru przy potwierdzaniu zadania wymagającego pomiaru pH — np. stół, lej nadziewarki, korpus nadziewarki.</div>
+      <div id="harmCodzPHMiejscaList"></div>
+      <div class="row" style="margin-top:8px;">
+        <div class="field" style="margin-bottom:0;flex:1;">
+          <input type="text" id="harmCodzNewPHMiejsce" placeholder="np. taśma transportowa">
+        </div>
+      </div>
+      <div class="row" style="margin-top:8px;">
+        <button class="btn secondary" id="harmCodzAddPHMiejsceBtn">Dodaj miejsce</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Akceptowalny zakres pH</h2>
+      <div class="hint" style="margin-bottom:12px;">Poza tym zakresem system wymaga opisu, co wdrożono, żeby poprawić wynik.</div>
+      <div class="row">
+        <div class="field" style="flex:1;">
+          <label>Min</label>
+          <input type="number" step="0.1" id="harmCodzPHZakresMin">
+        </div>
+        <div class="field" style="flex:1;">
+          <label>Max</label>
+          <input type="number" step="0.1" id="harmCodzPHZakresMax">
+        </div>
+      </div>
+      <button class="btn secondary" id="harmCodzSavePHZakresBtn">Zapisz zakres</button>
+    </div>
+  </div>
+
+</div>
+</div>
+<!-- /moduleHarmCodzienny -->
+
+
+<div id="moduleHarmCykliczny" style="display:none;">
+  <div class="module-topbar">
+    <button class="back-to-home" data-back="home" title="Powrót do menu">←</button>
+    <div class="module-topbar-title">🔄 Harmonogram cykliczny</div>
+  </div>
+  <nav class="tabs" id="tabsHarmCykl">
+    <button class="tab-btn active" data-view="harmCyklDzien">Do wykonania</button>
+    <button class="tab-btn" data-view="harmCyklObszary">Obszary</button>
+    <button class="tab-btn" data-view="harmCyklZadania">Zadania</button>
+    <button class="tab-btn" data-view="harmCyklHistoria">Historia</button>
+  </nav>
+<div class="container">
+
+  <div class="view active" id="view-harmCyklDzien">
+    <div class="card">
+      <div class="hint">Zadania, których termin (wg cyklu) przypada dziś lub wcześniej — pogrupowane wg obszaru. Zadania jeszcze niewymagane nie są tu pokazywane.</div>
+    </div>
+    <div id="harmCyklDzienList"></div>
+    <div class="empty-state" id="harmCyklDzienEmpty" style="display:none;">
+      <div class="icon">🔄</div>
+      <div>Brak zadań wymagających dziś wykonania.</div>
+    </div>
+  </div>
+
+  <div class="view" id="view-harmCyklObszary">
+    <div class="card">
+      <h2>Obszary</h2>
+      <div class="hint" style="margin-bottom:12px;">W pełni edytowalna lista — np. Antipasti, Hummus. Osobna od obszarów Harmonogramu codziennego.</div>
+      <div id="harmCyklObszaryList"></div>
+      <div class="row" style="margin-top:8px;">
+        <div class="field" style="margin-bottom:0;flex:1;">
+          <input type="text" id="harmCyklNewObszarNazwa" placeholder="np. Hummus">
+        </div>
+      </div>
+      <div class="row" style="margin-top:8px;">
+        <button class="btn secondary" id="harmCyklAddObszarBtn">Dodaj obszar</button>
+        <button class="btn" id="harmCyklCancelObszarEditBtn" style="display:none;">Anuluj</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="view" id="view-harmCyklZadania">
+    <div class="card">
+      <h2>Zadania</h2>
+      <div class="hint" style="margin-bottom:12px;">Każde zadanie ma swój cykl — co ile dni, albo w konkretne dni tygodnia.</div>
+      <div id="harmCyklZadaniaList"></div>
+      <div class="field">
+        <label>Obszar</label>
+        <select id="harmCyklNewZadanieObszar"></select>
+      </div>
+      <div class="field">
+        <label>Nazwa zadania</label>
+        <input type="text" id="harmCyklNewZadanieNazwa" placeholder="np. Dezynfekcja głęboka">
+      </div>
+      <div class="field">
+        <label>Typ cyklu</label>
+        <select id="harmCyklNewZadanieCyklTyp">
+          <option value="interwal">Co określoną liczbę dni</option>
+          <option value="dni_tygodnia">Konkretne dni tygodnia</option>
+        </select>
+      </div>
+      <div class="field" id="harmCyklNewZadanieInterwalPole">
+        <label>Co ile dni</label>
+        <input type="number" id="harmCyklNewZadanieInterwalDni" min="1" placeholder="np. 7" style="max-width:120px;">
+      </div>
+      <div class="field" id="harmCyklNewZadanieDniTygodniaPole" style="display:none;">
+        <label>Dni tygodnia</label>
+        <div id="harmCyklNewZadanieDniTygodniaWybor" style="display:flex;gap:6px;flex-wrap:wrap;"></div>
+      </div>
+      <label style="display:flex;align-items:center;gap:8px;margin-bottom:12px;cursor:pointer;">
+        <input type="checkbox" id="harmCyklNewZadanieWymagaPH" style="width:20px;height:20px;">
+        <span>Wymaga pomiaru pH</span>
+      </label>
+      <div class="row">
+        <button class="btn secondary" id="harmCyklAddZadanieBtn">Dodaj zadanie</button>
+        <button class="btn" id="harmCyklCancelZadanieEditBtn" style="display:none;">Anuluj</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="view" id="view-harmCyklHistoria">
+    <div class="card">
+      <h2>Historia potwierdzeń</h2>
+      <div class="row">
+        <div class="field" style="flex:1;">
+          <label>Od</label>
+          <input type="date" id="harmCyklHistOd">
+        </div>
+        <div class="field" style="flex:1;">
+          <label>Do</label>
+          <input type="date" id="harmCyklHistDo">
+        </div>
+      </div>
+      <button class="btn secondary" id="harmCyklHistFilterBtn">Pokaż</button>
+    </div>
+    <div id="harmCyklHistoriaList"></div>
+  </div>
+
+</div>
+</div>
+<!-- /moduleHarmCykliczny -->
+
 <div id="moduleUstawienia" style="display:none;">
   <div class="module-topbar">
     <button class="back-to-home" data-back="home" title="Powrót do menu">←</button>
@@ -2126,6 +2386,7 @@
     <button class="tab-btn" data-view="magIssues">Wydania</button>
     <button class="tab-btn" data-view="magZuzycie">Zużycie</button>
     <button class="tab-btn" data-view="magOrders">Zamówienia</button>
+    <button class="tab-btn" data-view="magZewnetrzny">Zewnętrzny</button>
   </nav>
 <div class="container">
 
@@ -2417,6 +2678,14 @@
           <label>Liczba dni</label>
           <input type="number" step="1" min="1" id="magForecastZapasInna" placeholder="np. 21">
         </div>
+        <div class="field">
+          <label>Źródło danych o zużyciu</label>
+          <select id="magForecastZrodloZuzycia">
+            <option value="lokalne" selected>Lokalne wpisy w ZSZD (Wydania/Zużycie)</option>
+            <option value="zewnetrzne">Dane z systemu magazynowego (10.0.60.24) — tam, gdzie dopasowany indeks</option>
+          </select>
+          <div class="hint" style="margin-top:4px;">Stan magazynowy zawsze liczony z Twoich danych w ZSZD — ta opcja zmienia tylko, skąd bierze się tempo zużycia. Wymaga uzupełnionego pola "Indeks" w Bazie produktów i wcześniejszego pobrania danych w zakładce "Zewnętrzny".</div>
+        </div>
         <div class="btn-row">
           <button class="btn full-width" id="magForecastGenerateBtn">Generuj sugestię</button>
         </div>
@@ -2440,6 +2709,21 @@
           <button class="btn full-width" id="magForecastCreateOrderBtn">Utwórz zamówienie z zaznaczonych</button>
         </div>
       </div>
+    </div>
+  </div>
+
+
+  <div class="view" id="view-magZewnetrzny">
+    <div class="card">
+      <h2>Dane z systemu magazynowego (10.0.60.24)</h2>
+      <div class="hint" style="margin-bottom:12px;">Raz w tygodniu uruchom skrypt na komputerze z dostępem do 10.0.60.24 — dane pojawią się tutaj automatycznie. To jest osobny, tylko-do-odczytu podgląd (nie zmienia Twoich lokalnych stanów magazynowych) — pomocny przy tworzeniu zamówień na podstawie realnego zużycia.</div>
+      <button class="btn full-width" id="magFetchZewnetrznyBtn" style="margin-bottom:8px;">☁️ Pobierz dane z systemu magazynowego</button>
+      <div class="hint" id="magZewnetrznyInfo"></div>
+    </div>
+    <div id="magZewnetrznyList"></div>
+    <div class="empty-state" id="magZewnetrznyEmpty" style="display:none;">
+      <div class="icon">📥</div>
+      <div>Jeszcze nic nie pobrano — uruchom najpierw skrypt na 10.0.60.24, potem kliknij przycisk wyżej.</div>
     </div>
   </div>
 
@@ -3441,6 +3725,8 @@
 
 <script src="magazyn.js"></script>
 <script src="szkolenia.js"></script>
+<script src="harmonogram-codzienny.js"></script>
+<script src="harmonogram-cykliczny.js"></script>
 <script src="zuzycie.js"></script>
 <!-- Firebase: automatyczna synchronizacja z centralą (dodatkowa, obok pliku).
      Ładowane na samym końcu, żeby firebase-sync.js miało pewność, że WSZYSTKIE
