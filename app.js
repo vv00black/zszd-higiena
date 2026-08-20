@@ -904,7 +904,7 @@ document.querySelectorAll('.back-to-home').forEach(btn => {
 // JEDNO źródło prawdy: stała poniżej. Aktualizowana automatycznie przy każdym
 // pakowaniu paczki (skrypt wersjonujący), więc UI nigdy nie pokazuje starego
 // numeru tak jak się to zdarzyło wcześniej przy ręcznej edycji w trzech miejscach.
-const PWA_BUILD_VERSION = 'v144';
+const PWA_BUILD_VERSION = 'v145';
 function applyBuildVersionLabel(label) {
   const title = document.getElementById('pageTitle');
   if (title) title.textContent = `ZSZD Higiena ADMIN ${label}`;
