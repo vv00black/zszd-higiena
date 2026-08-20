@@ -2387,6 +2387,7 @@
     <button class="tab-btn" data-view="magZuzycie">Zużycie</button>
     <button class="tab-btn" data-view="magOrders">Zamówienia</button>
     <button class="tab-btn" data-view="magZewnetrzny">Zewnętrzny</button>
+    <button class="tab-btn" data-view="magRemanent">Remanent</button>
   </nav>
 <div class="container">
 
@@ -2741,6 +2742,34 @@
     <div id="magPorownanieNiedopasowane"></div>
   </div>
 
+  <div class="view" id="view-magRemanent">
+    <div class="card">
+      <h2>Remanent — ręczne sprawdzenie stanów</h2>
+      <div class="hint" style="margin-bottom:12px;">Przejdź listę i wpisz faktycznie POLICZONĄ ilość (w sztukach/opakowaniach) przy każdym produkcie, który sprawdzasz. Dopiero po kliknięciu "Zastosuj korekty" system doda różnice do Przyjęć/Wydań i zaktualizuje stany — do tego momentu nic się nie zmienia.</div>
+      <div class="progress-track" style="height:8px;border-radius:5px;background:var(--card2);overflow:hidden;">
+        <div id="magRemanentProgressFill" style="height:100%;background:var(--accent);width:0%;transition:width .25s ease;"></div>
+      </div>
+      <div class="hint" id="magRemanentProgressLabel" style="margin-top:6px;">0 z 0 sprawdzone</div>
+    </div>
+    <div class="card">
+      <div class="btn-row">
+        <button class="btn full-width" id="magRemanentApplyBtn">✅ Zastosuj korekty</button>
+      </div>
+      <div class="btn-row" style="margin-top:8px;">
+        <button class="btn secondary full-width" id="magRemanentExportBtn">📊 Eksportuj do Excela</button>
+      </div>
+      <div class="btn-row" style="margin-top:8px;">
+        <button class="btn secondary full-width" id="magRemanentResetBtn">🗑️ Wyczyść bieżący spis</button>
+      </div>
+    </div>
+    <div id="magRemanentList"></div>
+
+    <div class="card">
+      <h2>Historia remanentów</h2>
+    </div>
+    <div id="magRemanentHistoriaList"></div>
+  </div>
+
 
 </div>
 <button class="fab" id="addProductFab">+</button>
@@ -3027,6 +3056,7 @@
         <label>Stan początkowy</label>
         <input type="number" step="any" id="magProductStanPocz" placeholder="0">
         <div class="hint" id="magProductStanPoczHint"></div>
+        <div class="hint" id="magProductStanPoczDataInfo"></div>
       </div>
     </div>
     <div class="field">

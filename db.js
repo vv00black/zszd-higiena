@@ -4,7 +4,7 @@
 //       employees, attendanceRecords, leaveRequests
 
 const DB_NAME = 'nadziewarki_serwis_db';
-const DB_VERSION = 14;
+const DB_VERSION = 15;
 let dbInstance = null;
 
 function openDB() {
@@ -174,6 +174,13 @@ function openDB() {
       // Dotyczy WYŁĄCZNIE Harmonogramu codziennego, nie cyklicznego.
       if (!db.objectStoreNames.contains('harmCodzStatusy')) {
         db.createObjectStore('harmCodzStatusy', { keyPath: 'id' });
+      }
+      // Historia zastosowanych remanentów (v15) — każdy wpis to jeden
+      // zbiorczy remanent (data, kto wykonał, lista skorygowanych pozycji).
+      // Roboczy, jeszcze-niezatwierdzony spis trzyma się osobno w
+      // ustawieniach (magRemanentRoboczy), nie w tym store.
+      if (!db.objectStoreNames.contains('magRemanenty')) {
+        db.createObjectStore('magRemanenty', { keyPath: 'id' });
       }
       // Harmonogram cykliczny (v13) — ta sama idea, ale zadania mają
       // częstotliwość (co X dni albo konkretne dni tygodnia) zamiast "co dzień".
@@ -1380,6 +1387,14 @@ DB.saveHarmCodzStatus = (s) => {
   return DB.put('harmCodzStatusy', s);
 };
 DB.deleteHarmCodzStatus = (id) => DB.delete('harmCodzStatusy', id);
+
+// Historia zastosowanych remanentów — zapisywane RAZ, zbiorczo, po kliknięciu
+// "Zastosuj korekty" (nie edytowane później — to jest log, nie robocza dana).
+DB.getMagRemanenty = () => DB.getAll('magRemanenty');
+DB.saveMagRemanent = (r) => {
+  if (!r.id) { r.id = genId(); r.createdAt = Date.now(); }
+  return DB.put('magRemanenty', r);
+};
 
 // ===== HARMONOGRAM CYKLICZNY (jak wyżej, ale zadania mają częstotliwość) =====
 DB.getHarmCyklObszary = () => DB.getAll('harmCyklObszary');

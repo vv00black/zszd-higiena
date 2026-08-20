@@ -16,7 +16,9 @@ let magState = {
   pendingReceiptItems: [], // pozycje dodawane wsadowo w oknie "Nowe przyjęcia" przed zapisem
   pendingIssueItems: [],   // jw. dla "Nowe wydania"
   blokadaUjemnych: true,   // domyślnie WŁĄCZONA — nadpisywana ustawieniem z bazy w initMagazyn()
-  zewnetrzne: null          // ostatnia pobrana paczka danych z systemu 10.0.60.24 (patrz initMagazyn)
+  zewnetrzne: null,         // ostatnia pobrana paczka danych z systemu 10.0.60.24 (patrz initMagazyn)
+  remanentRoboczy: {},      // { productId: { policzony: liczba|null, sprawdzone: bool } } — bieżący, jeszcze niezatwierdzony spis
+  remanenty: []             // historia zastosowanych (zatwierdzonych) remanentów
 };
 
 // ===== Ustawienie: blokada wydań schodzących poniżej zera =====
@@ -47,6 +49,8 @@ async function initMagazyn() {
   magState.orders = await DB.getMagOrders();
   await magLoadBlokadaSetting();
   magState.zewnetrzne = await DB.getSetting('magZewnetrzneCache', null);
+  magState.remanentRoboczy = await DB.getSetting('magRemanentRoboczy', {});
+  magState.remanenty = await DB.getMagRemanenty();
 
   document.getElementById('magIssueData').value = todayStr();
   document.getElementById('magOrderData').value = todayStr();
@@ -61,8 +65,15 @@ async function initMagazyn() {
 
 // ===== Obliczenia stanu magazynowego =====
 function computeStock(product) {
-  const przyjecia = magState.receipts.filter(r => r.productId === product.id).reduce((s, r) => s + (Number(r.iloscRazem) || 0), 0);
-  const wydania = magState.issues.filter(i => i.productId === product.id).reduce((s, i) => s + (Number(i.iloscWydana) || 0), 0);
+  // "Stan początkowy" to punkt odniesienia — liczymy tylko przyjęcia/wydania
+  // ZAREJESTROWANE OD DATY jego ostatniego ustawienia (stanPoczatkowyData),
+  // nie całą historię od zawsze. Dzięki temu wpisanie nowego "Stan początkowy"
+  // faktycznie resetuje liczenie do stanu faktycznego, zamiast dalej doliczać
+  // ruchy sprzed resetu. Produkty bez tego pola (utworzone przed tą zmianą)
+  // liczą jak dotychczas — cała historia, bez progu daty.
+  const bazowaData = product.stanPoczatkowyData || '';
+  const przyjecia = magState.receipts.filter(r => r.productId === product.id && (!bazowaData || (r.data || '') >= bazowaData)).reduce((s, r) => s + (Number(r.iloscRazem) || 0), 0);
+  const wydania = magState.issues.filter(i => i.productId === product.id && (!bazowaData || (i.data || '') >= bazowaData)).reduce((s, i) => s + (Number(i.iloscWydana) || 0), 0);
   const stanPoczatkowy = Number(product.stanPoczatkowy) || 0;
   const stanBiezacy = stanPoczatkowy + przyjecia - wydania;
   const stanMin = Number(product.stanMinimalny) || 0;
@@ -260,6 +271,12 @@ function openMagProductModal(productId) {
     setMagProductJmValue(p.jm || '');
     document.getElementById('magProductStanMin').value = magStoredToOpak(p.stanMinimalny, p.wielkoscOpak);
     document.getElementById('magProductStanPocz').value = magStoredToOpak(p.stanPoczatkowy, p.wielkoscOpak);
+    const dataInfo = document.getElementById('magProductStanPoczDataInfo');
+    if (dataInfo) {
+      dataInfo.textContent = p.stanPoczatkowyData
+        ? `Bieżący stan liczony od: ${formatDatePl(p.stanPoczatkowyData)} (wcześniejsze przyjęcia/wydania nie wliczają się).`
+        : 'Bieżący stan liczony od całej historii przyjęć/wydań tego produktu.';
+    }
     document.getElementById('magProductUwagi').value = p.uwagi || '';
     delBtn.style.display = 'inline-block';
   } else {
@@ -271,6 +288,8 @@ function openMagProductModal(productId) {
     setMagProductJmValue('');
     document.getElementById('magProductStanMin').value = 0;
     document.getElementById('magProductStanPocz').value = 0;
+    const dataInfoNew = document.getElementById('magProductStanPoczDataInfo');
+    if (dataInfoNew) dataInfoNew.textContent = '';
     document.getElementById('magProductUwagi').value = '';
     delBtn.style.display = 'none';
   }
@@ -332,7 +351,13 @@ document.getElementById('saveMagProductBtn').addEventListener('click', async () 
   // pod polami) — przeliczamy na jednostkę miary przed zapisem, żeby stan
   // bieżący (liczony z przyjęć/wydań, zawsze w JM) porównywał się poprawnie.
   product.stanMinimalny = magOpakToStored(document.getElementById('magProductStanMin').value, product.wielkoscOpak);
-  product.stanPoczatkowy = magOpakToStored(document.getElementById('magProductStanPocz').value, product.wielkoscOpak);
+  const nowyStanPoczatkowy = magOpakToStored(document.getElementById('magProductStanPocz').value, product.wielkoscOpak);
+  // Resetuj punkt odniesienia TYLKO, gdy wartość faktycznie się zmienia — inaczej
+  // zwykła edycja np. nazwy/uwag przypadkiem "zerowałaby" liczenie od nowa.
+  if (nowyStanPoczatkowy !== (Number(product.stanPoczatkowy) || 0)) {
+    product.stanPoczatkowyData = todayStr();
+  }
+  product.stanPoczatkowy = nowyStanPoczatkowy;
   product.uwagi = document.getElementById('magProductUwagi').value.trim();
 
   await DB.saveMagProduct(product);
@@ -2002,4 +2027,247 @@ function renderMagPorownanie() {
       ${listaZewnetrzne}
     </div>
   `;
+}
+
+// ===== REMANENT: RĘCZNE SPRAWDZENIE STANÓW + AUTOMATYCZNA KOREKTA =====
+// Dostęp: tylko admin/koordynator — ograniczenie już działa generycznie przez
+// istniejący mechanizm w app.js (openModule('magazyn') ukrywa wszystkie
+// zakładki oprócz magZuzycie dla roli 'obszar'), zero dodatkowych zmian.
+//
+// Przebieg: admin przechodzi listę WSZYSTKICH aktywnych produktów, zaznacza
+// "sprawdzone" i wpisuje faktycznie POLICZONĄ ilość (w sztukach/opakowaniach —
+// tak liczy się fizycznie na półce). Dopiero po kliknięciu "Zastosuj korekty"
+// (zbiorczo, na końcu) system dolicza RÓŻNICE jako wpisy w Przyjęciach/
+// Wydaniach (nie nadpisuje stanPoczatkowy — zachowuje pełną historię/
+// audytowalność, dokładnie tak jak każda inna operacja w Magazynie).
+// Korekta OMIJA blokadę stanów ujemnych — to nie jest "wydanie ponad stan",
+// to jest fizyczna prawda z liczenia, ma zawsze przejść.
+
+// Stan systemowy w sztukach/opakowaniach — ta sama logika co w porównywarce
+// z systemem zewnętrznym (v149), bo remanent też liczy się fizycznie w sztukach,
+// nie w rozłożonej jednostce magazynowej (kg/l).
+function magStanSystemowyWSztukach(p) {
+  const rozlozony = computeStock(p).stanBiezacy;
+  return p.wielkoscOpak ? magStoredToOpak(rozlozony, p.wielkoscOpak) : rozlozony;
+}
+
+function magRemanentPodsumowanie() {
+  const produkty = magState.products.filter(p => p.active !== 0);
+  let sprawdzone = 0;
+  let roznice = 0;
+  produkty.forEach(p => {
+    const wpis = magState.remanentRoboczy[p.id];
+    if (wpis && wpis.sprawdzone) {
+      sprawdzone++;
+      if (wpis.policzony !== null && wpis.policzony !== undefined) {
+        const systemowy = magStanSystemowyWSztukach(p);
+        const roznica = Math.round((Number(wpis.policzony) - systemowy) * 100) / 100;
+        if (roznica !== 0) roznice++;
+      }
+    }
+  });
+  return { sprawdzone, razem: produkty.length, roznice };
+}
+
+let magRemanentSaveTimer = null;
+function magRemanentPersist() {
+  clearTimeout(magRemanentSaveTimer);
+  magRemanentSaveTimer = setTimeout(async () => {
+    await DB.setSetting('magRemanentRoboczy', magState.remanentRoboczy);
+  }, 250);
+}
+
+function renderMagRemanent() {
+  const container = document.getElementById('magRemanentList');
+  const progressFill = document.getElementById('magRemanentProgressFill');
+  const progressLabel = document.getElementById('magRemanentProgressLabel');
+  if (!container) return;
+
+  const produkty = magState.products.filter(p => p.active !== 0)
+    .slice()
+    .sort((a, b) => (a.nazwa || '').localeCompare(b.nazwa || '', 'pl'));
+
+  const { sprawdzone, razem, roznice } = magRemanentPodsumowanie();
+  if (progressFill) progressFill.style.width = (razem ? (sprawdzone / razem * 100) : 0) + '%';
+  if (progressLabel) progressLabel.textContent = `${sprawdzone} z ${razem} sprawdzone${roznice ? ` · ${roznice} z różnicą` : ''}`;
+
+  if (!produkty.length) {
+    container.innerHTML = '<div class="hint">Brak produktów w Bazie produktów — dodaj je tam najpierw.</div>';
+    return;
+  }
+
+  container.innerHTML = produkty.map(p => {
+    const wpis = magState.remanentRoboczy[p.id] || { policzony: null, sprawdzone: false };
+    const systemowy = magStanSystemowyWSztukach(p);
+    const maWartosc = wpis.policzony !== null && wpis.policzony !== undefined;
+    const roznica = maWartosc ? Math.round((Number(wpis.policzony) - systemowy) * 100) / 100 : 0;
+    const pokazRoznice = wpis.sprawdzone && maWartosc && roznica !== 0;
+    const tloStyl = wpis.sprawdzone ? (pokazRoznice ? 'background:#f4e3d3;' : 'background:#e3ede4;') : '';
+    return `
+      <div class="checklist-row" style="flex-wrap:wrap;align-items:center;max-width:none;${tloStyl}">
+        <div style="flex:1;min-width:200px;">
+          <div style="font-weight:600;">${escapeHtml(p.nazwa)}${p.indeks ? ` <span class="hint">(${escapeHtml(p.indeks)})</span>` : ''}</div>
+          <div class="hint">System: ${systemowy} szt${pokazRoznice ? ` · <span style="color:${roznica > 0 ? '#a6521c' : '#c0392b'};font-weight:600;">różnica: ${roznica > 0 ? '+' : ''}${roznica}</span>` : ''}</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <input type="checkbox" data-remanent-sprawdzone="${p.id}" ${wpis.sprawdzone ? 'checked' : ''} style="width:24px;height:24px;">
+          <input type="number" step="0.01" data-remanent-policzono="${p.id}" value="${maWartosc ? wpis.policzony : ''}" placeholder="policzono" style="width:100px;padding:7px;">
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+document.getElementById('magRemanentList') && document.getElementById('magRemanentList').addEventListener('change', (e) => {
+  const chk = e.target.closest('[data-remanent-sprawdzone]');
+  if (!chk) return;
+  const id = chk.dataset.remanentSprawdzone;
+  if (!magState.remanentRoboczy[id]) magState.remanentRoboczy[id] = { policzony: null, sprawdzone: false };
+  magState.remanentRoboczy[id].sprawdzone = chk.checked;
+  magRemanentPersist();
+  renderMagRemanent();
+});
+document.getElementById('magRemanentList') && document.getElementById('magRemanentList').addEventListener('input', (e) => {
+  const inp = e.target.closest('[data-remanent-policzono]');
+  if (!inp) return;
+  const id = inp.dataset.remanentPoliczono;
+  if (!magState.remanentRoboczy[id]) magState.remanentRoboczy[id] = { policzony: null, sprawdzone: false };
+  magState.remanentRoboczy[id].policzony = inp.value === '' ? null : Number(inp.value);
+  // Wpisanie ilości = automatyczne zaznaczenie jako sprawdzone (jak w pierwowzorze).
+  if (inp.value !== '') magState.remanentRoboczy[id].sprawdzone = true;
+  magRemanentPersist();
+});
+// blur nie "bąbelkuje" — nasłuch z capture:true, żeby złapać go z dowolnego inputa.
+document.getElementById('magRemanentList') && document.getElementById('magRemanentList').addEventListener('blur', (e) => {
+  if (e.target.matches && e.target.matches('[data-remanent-policzono]')) renderMagRemanent();
+}, true);
+
+async function magRemanentZastosujKorekty() {
+  const produkty = magState.products.filter(p => p.active !== 0);
+  const doKorekty = [];
+  produkty.forEach(p => {
+    const wpis = magState.remanentRoboczy[p.id];
+    if (!wpis || !wpis.sprawdzone || wpis.policzony === null || wpis.policzony === undefined) return;
+    const systemowy = magStanSystemowyWSztukach(p);
+    const roznicaSztuk = Math.round((Number(wpis.policzony) - systemowy) * 100) / 100;
+    if (roznicaSztuk === 0) return;
+    doKorekty.push({ p, systemowy, policzony: Number(wpis.policzony), roznicaSztuk });
+  });
+
+  if (!doKorekty.length) { showToast('Brak różnic do skorygowania — wszystko się zgadza (albo nic nie sprawdzono).'); return; }
+
+  if (!confirm(`Zastosować korekty dla ${doKorekty.length} ${doKorekty.length === 1 ? 'produktu' : 'produktów'}? Doda to wpisy korygujące do Przyjęć/Wydań i zaktualizuje stany.`)) return;
+
+  const wykonawca = currentUserDisplayName();
+  const dzis = todayStr();
+  const pozycjeHistorii = [];
+
+  for (const { p, systemowy, policzony, roznicaSztuk } of doKorekty) {
+    const roznicaRozlozona = p.wielkoscOpak ? magOpakToStored(roznicaSztuk, p.wielkoscOpak) : roznicaSztuk;
+    if (roznicaRozlozona > 0) {
+      const r = {
+        productId: p.id, data: dzis,
+        ilosc: p.wielkoscOpak ? roznicaSztuk : roznicaRozlozona,
+        rodzaj: p.wielkoscOpak ? 'opak' : (p.jm === 'l' ? 'l' : 'kg'),
+        iloscRazem: roznicaRozlozona,
+        dostawca: `Korekta remanentowa (${wykonawca})`
+      };
+      await DB.saveMagReceipt(r);
+      magState.receipts.push(r);
+    } else {
+      const i = {
+        productId: p.id, data: dzis,
+        iloscOpak: p.wielkoscOpak ? Math.abs(roznicaSztuk) : null,
+        iloscWydana: Math.abs(roznicaRozlozona),
+        dzialCel: 'Korekta remanentowa',
+        wydal: wykonawca
+      };
+      await DB.saveMagIssue(i);
+      magState.issues.push(i);
+    }
+    pozycjeHistorii.push({ productId: p.id, nazwa: p.nazwa, indeks: p.indeks || '', systemowy, policzony, roznica: roznicaSztuk });
+  }
+
+  const remanent = { data: dzis, wykonawca, czas: new Date().toISOString(), pozycje: pozycjeHistorii };
+  await DB.saveMagRemanent(remanent);
+  magState.remanenty.unshift(remanent);
+
+  // Zamknięty cykl — wyczyść roboczy spis, gotowe na kolejny remanent.
+  magState.remanentRoboczy = {};
+  await DB.setSetting('magRemanentRoboczy', {});
+
+  renderMagRemanent();
+  renderMagRemanentHistoria();
+  renderMagStock();
+  renderMagReceipts();
+  renderMagIssues();
+  showToast(`Zastosowano korekty dla ${doKorekty.length} ${doKorekty.length === 1 ? 'produktu' : 'produktów'}`);
+}
+
+async function magRemanentWyczysc() {
+  if (!confirm('Wyczyścić bieżący spis? Zaznaczenia i wpisane ilości zostaną usunięte (już zastosowane korekty pozostają w historii).')) return;
+  magState.remanentRoboczy = {};
+  await DB.setSetting('magRemanentRoboczy', {});
+  renderMagRemanent();
+  showToast('Spis wyczyszczony');
+}
+
+function magRemanentEksportujExcel() {
+  const produkty = magState.products.filter(p => p.active !== 0);
+  const rows = produkty.map(p => {
+    const wpis = magState.remanentRoboczy[p.id] || { policzony: null, sprawdzone: false };
+    const systemowy = magStanSystemowyWSztukach(p);
+    const policzony = (wpis.policzony !== null && wpis.policzony !== undefined) ? Number(wpis.policzony) : '';
+    const roznica = (policzony !== '' && wpis.sprawdzone) ? Math.round((policzony - systemowy) * 100) / 100 : '';
+    return {
+      'Produkt': p.nazwa || '',
+      'Indeks': p.indeks || '',
+      'Stan w systemie (szt)': systemowy,
+      'Stan policzony (szt)': policzony,
+      'Sprawdzono': wpis.sprawdzone ? 'TAK' : 'NIE',
+      'Różnica': roznica
+    };
+  });
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.json_to_sheet(rows);
+  ws['!cols'] = [{ wch: 32 }, { wch: 14 }, { wch: 18 }, { wch: 18 }, { wch: 12 }, { wch: 10 }];
+  XLSX.utils.book_append_sheet(wb, ws, 'Remanent');
+  XLSX.writeFile(wb, `remanent-${todayStr()}.xlsx`);
+  showToast('Zapisano plik Excel');
+}
+
+document.getElementById('magRemanentApplyBtn') && document.getElementById('magRemanentApplyBtn').addEventListener('click', magRemanentZastosujKorekty);
+document.getElementById('magRemanentResetBtn') && document.getElementById('magRemanentResetBtn').addEventListener('click', magRemanentWyczysc);
+document.getElementById('magRemanentExportBtn') && document.getElementById('magRemanentExportBtn').addEventListener('click', async () => {
+  if (typeof XLSX === 'undefined') {
+    showToast('Ładowanie modułu Excel...');
+    await loadXLSXLib();
+  }
+  magRemanentEksportujExcel();
+});
+
+function renderMagRemanentHistoria() {
+  const container = document.getElementById('magRemanentHistoriaList');
+  if (!container) return;
+  const lista = [...magState.remanenty].sort((a, b) => (b.czas || '').localeCompare(a.czas || ''));
+  if (!lista.length) {
+    container.innerHTML = '<div class="hint">Brak jeszcze zastosowanych remanentów.</div>';
+    return;
+  }
+  container.innerHTML = lista.map(r => `
+    <div class="card" style="padding:12px 14px;margin-bottom:8px;">
+      <div style="font-weight:600;">${escapeHtml(r.data)} — ${escapeHtml(r.wykonawca || '—')}</div>
+      <div class="hint" style="margin-top:4px;">Skorygowano ${r.pozycje.length} ${r.pozycje.length === 1 ? 'pozycję' : 'pozycji'}</div>
+      <div style="margin-top:6px;">
+        ${r.pozycje.map(poz => `<div class="hint">• ${escapeHtml(poz.nazwa)}${poz.indeks ? ` (${escapeHtml(poz.indeks)})` : ''}: ${poz.systemowy} → ${poz.policzony} szt (${poz.roznica > 0 ? '+' : ''}${poz.roznica})</div>`).join('')}
+      </div>
+    </div>
+  `).join('');
+}
+
+// Wywoływana przez switchTab przy wejściu w zakładkę "Remanent" — odświeża
+// listę i historię razem (odswiez mapping przyjmuje tylko jedną funkcję).
+function renderMagRemanentZakladka() {
+  renderMagRemanent();
+  renderMagRemanentHistoria();
 }
