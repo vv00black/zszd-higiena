@@ -2083,16 +2083,29 @@ function renderMagRemanent() {
   const progressLabel = document.getElementById('magRemanentProgressLabel');
   if (!container) return;
 
-  const produkty = magState.products.filter(p => p.active !== 0)
-    .slice()
-    .sort((a, b) => (a.nazwa || '').localeCompare(b.nazwa || '', 'pl'));
-
+  // Pasek postępu zawsze liczy się po WSZYSTKICH aktywnych produktach —
+  // niezależnie od tego, co akurat pokazuje filtr wyszukiwania poniżej.
   const { sprawdzone, razem, roznice } = magRemanentPodsumowanie();
   if (progressFill) progressFill.style.width = (razem ? (sprawdzone / razem * 100) : 0) + '%';
   if (progressLabel) progressLabel.textContent = `${sprawdzone} z ${razem} sprawdzone${roznice ? ` · ${roznice} z różnicą` : ''}`;
 
-  if (!produkty.length) {
+  const wszystkieProdukty = magState.products.filter(p => p.active !== 0)
+    .slice()
+    .sort((a, b) => (a.nazwa || '').localeCompare(b.nazwa || '', 'pl'));
+
+  if (!wszystkieProdukty.length) {
     container.innerHTML = '<div class="hint">Brak produktów w Bazie produktów — dodaj je tam najpierw.</div>';
+    return;
+  }
+
+  const filtrInput = document.getElementById('magRemanentFiltr');
+  const filtr = filtrInput ? filtrInput.value.trim().toLowerCase() : '';
+  const produkty = filtr
+    ? wszystkieProdukty.filter(p => (p.nazwa || '').toLowerCase().includes(filtr) || (p.indeks || '').toLowerCase().includes(filtr))
+    : wszystkieProdukty;
+
+  if (!produkty.length) {
+    container.innerHTML = '<div class="hint">Brak wyników dla tego wyszukiwania.</div>';
     return;
   }
 
@@ -2236,6 +2249,7 @@ function magRemanentEksportujExcel() {
   showToast('Zapisano plik Excel');
 }
 
+document.getElementById('magRemanentFiltr') && document.getElementById('magRemanentFiltr').addEventListener('input', renderMagRemanent);
 document.getElementById('magRemanentApplyBtn') && document.getElementById('magRemanentApplyBtn').addEventListener('click', magRemanentZastosujKorekty);
 document.getElementById('magRemanentResetBtn') && document.getElementById('magRemanentResetBtn').addEventListener('click', magRemanentWyczysc);
 document.getElementById('magRemanentExportBtn') && document.getElementById('magRemanentExportBtn').addEventListener('click', async () => {
