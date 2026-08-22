@@ -1,0 +1,41 @@
+{
+  "name": "zszd-higiena-brygadzista",
+  "version": "2.12.4",
+  "description": "ZSZD Higiena BRYGADZISTA — wersja desktopowa (Windows)",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --win --x64"
+  },
+  "author": "Perla Pełna Dobra",
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "pl.perlapelnadobra.zszd.brygadzista",
+    "productName": "ZSZD Higiena BRYGADZISTA",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "app/**/*"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "app/icons/icon-512.png",
+      "signAndEditExecutable": false
+    },
+    "portable": {
+      "artifactName": "ZSZD-Higiena-BRYGADZISTA-portable-${version}.exe"
+    }
+  }
+}
