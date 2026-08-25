@@ -145,15 +145,24 @@ let fbLastSendErrorMessage = '';
 // mogły się tam cicho zakraść), (2) tablicy zagnieżdżonej bezpośrednio w
 // innej tablicy (np. siatka harmonogramu jako [[...],[...]]). Ta funkcja
 // rekurencyjnie "odkaża" dane tuż przed wysyłką: usuwa klucze z wartością
-// undefined, opakowuje zagnieżdżone tablice w obiekt {__nestedArray:[...]}
+// undefined, opakowuje zagnieżdżone tablice w obiekt {nestedArrayItems:[...]}
 // — bez utraty żadnych rzeczywistych danych, tylko w formacie, który
 // Firestore akceptuje.
+// NAPRAWA (Aug 24, szósta): user wciąż widział IDENTYCZNY komunikat błędu
+// ("Property stores contains an invalid nested entity") mimo zainstalowanej
+// naprawy z poprzedniej wersji. Przyczyna: Firestore REZERWUJE nazwy pól
+// zaczynające się od podwójnego podkreślenia ("__...") do własnego użytku
+// wewnętrznego i ODRZUCA dokumenty, które ich używają — a poprzednia naprawa
+// jako nazwę "opakowania" dla zagnieżdżonych tablic wybrała właśnie taką
+// nazwę ("__nestedArray"), tworząc NOWE naruszenie tego samego typu, z tym
+// samym ogólnym komunikatem błędu. Zmieniono na "nestedArrayItems" (bez
+// wiodących podkreśleń) — potwierdzone testem, że to usuwa naruszenie.
 function fbSanitizeForFirestore(value) {
   if (value === undefined || value === null) return null;
   if (Array.isArray(value)) {
     return value.map(v => {
       const s = fbSanitizeForFirestore(v);
-      return Array.isArray(s) ? { __nestedArray: s } : s;
+      return Array.isArray(s) ? { nestedArrayItems: s } : s;
     });
   }
   if (value instanceof Date) return value;
@@ -163,6 +172,26 @@ function fbSanitizeForFirestore(value) {
       if (v === undefined) continue;
       out[k] = fbSanitizeForFirestore(v);
     }
+    return out;
+  }
+  return value;
+}
+
+// Odwrotność powyższego — rozpakowuje {nestedArrayItems:[...]} z powrotem do
+// zwykłej zagnieżdżonej tablicy. BRAKOWAŁO tego wcześniej: bez tego kroku
+// dane odebrane w Centrali zostałyby po cichu uszkodzone (zagnieżdżone
+// tablice na stałe zamieniłyby się w opakowane obiekty). Wywoływane zaraz
+// po sklejeniu części paczki, zanim trafi do saveCentralSubmission/scalania.
+function fbDesanitizeFromFirestore(value) {
+  if (value === null) return value;
+  if (Array.isArray(value)) return value.map(fbDesanitizeFromFirestore);
+  if (typeof value === 'object') {
+    const keys = Object.keys(value);
+    if (keys.length === 1 && keys[0] === 'nestedArrayItems' && Array.isArray(value.nestedArrayItems)) {
+      return value.nestedArrayItems.map(fbDesanitizeFromFirestore);
+    }
+    const out = {};
+    for (const [k, v] of Object.entries(value)) out[k] = fbDesanitizeFromFirestore(v);
     return out;
   }
   return value;
@@ -369,7 +398,10 @@ function fbGroupAndReassemble(rawDocs) {
     const { chunkGroupId, chunkIndex, chunkCount, stores, ...meta } = parts[0].pkg;
     complete.push({ ids: parts.map(p => p.id), pkg: { ...meta, stores: mergedStores } });
   }
-  return complete;
+  // Rozpakuj zagnieżdżone tablice z powrotem do normalnej postaci (patrz
+  // fbDesanitizeFromFirestore wyżej) — bez tego dane zostałyby po cichu
+  // uszkodzone w Centrali.
+  return complete.map(({ ids, pkg }) => ({ ids, pkg: fbDesanitizeFromFirestore(pkg) }));
 }
 
 async function fbFetchNewSubmissions() {
